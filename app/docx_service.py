@@ -1,6 +1,6 @@
-# app/docx_service.py
 from __future__ import annotations
 
+import os
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable, List, Dict, Tuple, Optional
@@ -11,27 +11,32 @@ from PIL import Image, ImageOps, ImageFilter
 
 from docx import Document
 from docx.shared import Pt, Inches
+from docx.oxml.ns import qn
 
-# ✅ Tesseract path muammosini oldini olish uchun:
+# ============================================================
+# GLOBAL DOCX FONT (CYRILLIC SAFE)
+# ============================================================
+
+FONT_NAME = "Roboto"
+
+# ============================================================
+# Tesseract setup (safe)
+# ============================================================
+
 try:
     from .ocr_service import ensure_tesseract
 except Exception:
     ensure_tesseract = None
 
+# ============================================================
+# OCR helpers
+# ============================================================
 
-# -----------------------------
-# OCR config / preprocessing
-# -----------------------------
 def _tess_config(psm: int = 6) -> str:
-    # psm=6: hujjatdagi text bloklari uchun eng ko‘p mos
     return f"--oem 3 --psm {psm} --dpi 300"
 
 
 def _maybe_autorotate(img: Image.Image) -> Image.Image:
-    """
-    OSD ishlasa rotate qiladi (90/180/270).
-    Ishlamasa — jim o‘tib ketadi.
-    """
     try:
         osd = pytesseract.image_to_osd(img, output_type=Output.DICT)
         rotate = int(osd.get("rotate", 0) or 0)
@@ -43,15 +48,6 @@ def _maybe_autorotate(img: Image.Image) -> Image.Image:
 
 
 def _preprocess_for_ocr(img: Image.Image) -> Image.Image:
-    """
-    PIL-only preprocessing:
-    - EXIF orientation fix
-    - grayscale
-    - autocontrast
-    - yengil denoise
-    - simple threshold
-    - kichik rasm bo‘lsa upscale
-    """
     img = ImageOps.exif_transpose(img)
 
     if img.mode not in ("RGB", "L"):
@@ -61,65 +57,56 @@ def _preprocess_for_ocr(img: Image.Image) -> Image.Image:
 
     w, h = img.size
     if max(w, h) < 1400:
-        img = img.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
+        img = img.resize((w * 2, h * 2), Image.LANCZOS)
 
     img = ImageOps.autocontrast(img)
     img = img.filter(ImageFilter.MedianFilter(size=3))
-
-    # threshold (agressiv emas, lekin foydali)
     img = img.point(lambda p: 255 if p > 160 else 0)
 
     return img
 
 
-def _safe_open_image(image_path: Path) -> Image.Image:
-    img = Image.open(image_path)
-    # RGBA/P -> RGB/L
+def _safe_open_image(path: Path) -> Image.Image:
+    img = Image.open(path)
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
     return img
 
+# ============================================================
+# Utils
+# ============================================================
 
-# -----------------------------
-# Utils / heuristics
-# -----------------------------
 def _px_to_pt(px: float) -> float:
-    # DPI aniq emas -> heuristika
     return max(9.0, min(28.0, px * 0.75))
 
 
-def _is_numbered_line(line_text: str) -> bool:
-    s = line_text.strip()
-    if not s:
-        return False
-    if s[0].isdigit():
-        if len(s) >= 2 and s[1] in [".", ")", " "]:
-            return True
-        if len(s) >= 3 and s[1].isdigit() and s[2] in [".", ")", " "]:
-            return True
-    return False
+def _is_numbered(text: str) -> bool:
+    s = text.strip()
+    return bool(s and s[0].isdigit() and len(s) > 1)
 
 
-def _is_bulleted_line(line_text: str) -> bool:
-    s = line_text.strip()
-    return s.startswith(("-", "•", "·", "*"))
+def _is_bullet(text: str) -> bool:
+    return text.strip().startswith(("-", "•", "*", "·"))
 
 
-def _join_words_with_spacing(words: List[Dict], median_h: float) -> str:
-    """
-    Wordlarni left koordinata bo‘yicha join qilamiz.
-    Gap katta bo‘lsa — 2 space (“tab”ga o‘xshash) qo‘yamiz.
-    """
-    if not words:
-        return ""
+def _apply_font(run):
+    run.font.name = FONT_NAME
 
+    rPr = run._element.get_or_add_rPr()
+    rFonts = rPr.get_or_add_rFonts()
+
+    rFonts.set(qn("w:ascii"), FONT_NAME)
+    rFonts.set(qn("w:hAnsi"), FONT_NAME)
+    rFonts.set(qn("w:eastAsia"), FONT_NAME)
+    rFonts.set(qn("w:cs"), FONT_NAME)
+
+
+def _join_words(words: List[Dict], median_h: float) -> str:
     words = sorted(words, key=lambda w: int(w["left"]))
+    out = []
+    prev_right = None
 
-    out: List[str] = []
-    prev_right: Optional[int] = None
-
-    gap_1 = max(6.0, median_h * 0.60)   # 1 space
-    gap_2 = max(14.0, median_h * 1.40)  # 2 space
+    gap_2 = max(14.0, median_h * 1.4)
 
     for w in words:
         txt = (w.get("text") or "").strip()
@@ -131,216 +118,160 @@ def _join_words_with_spacing(words: List[Dict], median_h: float) -> str:
 
         if prev_right is None:
             out.append(txt)
-            prev_right = right
-            continue
-
-        gap = left - prev_right
-        if gap >= gap_2:
-            out.append("  " + txt)
         else:
-            # aksariyat holatda 1 space kerak
-            out.append(" " + txt)
+            out.append(("  " if left - prev_right >= gap_2 else " ") + txt)
 
         prev_right = right
 
-    return "".join(out).strip()
+    return "".join(out)
 
+# ============================================================
+# Extract lines
+# ============================================================
 
-# -----------------------------
-# Core: extract lines
-# -----------------------------
-def _extract_lines(img_pil: Image.Image, lang: str) -> List[Dict]:
-    """
-    Tesseract’dan word-level data olib, line-larga guruhlaymiz.
-    Qaytadi: har bir line uchun dict:
-      text, left, top, height, words(list)
-    """
+def _extract_lines(img: Image.Image, lang: str) -> List[Dict]:
     if callable(ensure_tesseract):
         ensure_tesseract()
 
-    # ✅ preprocess + auto-rotate
-    img = _preprocess_for_ocr(img_pil)
-    img = _maybe_autorotate(img)
+    img = _maybe_autorotate(_preprocess_for_ocr(img))
 
     data = pytesseract.image_to_data(
         img,
         lang=lang,
         output_type=Output.DICT,
-        config=_tess_config(psm=6),
+        config=_tess_config(),
     )
 
-    n = len(data["text"])
-    rows: List[Dict] = []
-
-    for i in range(n):
-        txt = (data["text"][i] or "").strip()
-
-        conf_raw = data.get("conf", ["-1"])[i]
+    rows = []
+    for i, txt in enumerate(data["text"]):
+        txt = (txt or "").strip()
         try:
-            conf = int(float(conf_raw))
+            conf = int(float(data["conf"][i]))
         except Exception:
             conf = -1
 
         if not txt or conf < 0:
             continue
 
-        rows.append(
-            {
-                "block": int(data["block_num"][i]),
-                "par": int(data["par_num"][i]),
-                "line": int(data["line_num"][i]),
-                "word": int(data["word_num"][i]),
-                "text": txt,
-                "left": int(data["left"][i]),
-                "top": int(data["top"][i]),
-                "width": int(data["width"][i]),
-                "height": int(data["height"][i]),
-                "conf": conf,
-            }
-        )
+        rows.append({
+            "block": data["block_num"][i],
+            "par": data["par_num"][i],
+            "line": data["line_num"][i],
+            "text": txt,
+            "left": data["left"][i],
+            "top": data["top"][i],
+            "width": data["width"][i],
+            "height": data["height"][i],
+        })
 
-    rows.sort(key=lambda r: (r["block"], r["par"], r["line"], r["word"], r["left"]))
-
-    # group by (block, par, line)
-    lines_map: Dict[Tuple[int, int, int], Dict] = {}
+    lines = {}
     for r in rows:
         key = (r["block"], r["par"], r["line"])
-        if key not in lines_map:
-            lines_map[key] = {
-                "words": [],
-                "left": r["left"],
-                "top": r["top"],
-                "height": r["height"],
-            }
-        lines_map[key]["words"].append(r)
-        lines_map[key]["left"] = min(lines_map[key]["left"], r["left"])
-        lines_map[key]["top"] = min(lines_map[key]["top"], r["top"])
-        lines_map[key]["height"] = max(lines_map[key]["height"], r["height"])
+        lines.setdefault(key, {"words": [], "left": r["left"], "top": r["top"], "height": r["height"]})
+        lines[key]["words"].append(r)
+        lines[key]["left"] = min(lines[key]["left"], r["left"])
+        lines[key]["top"] = min(lines[key]["top"], r["top"])
+        lines[key]["height"] = max(lines[key]["height"], r["height"])
 
-    heights = sorted([v["height"] for v in lines_map.values()])
-    median_h = heights[len(heights) // 2] if heights else 16.0
+    heights = [v["height"] for v in lines.values()]
+    median_h = sorted(heights)[len(heights)//2] if heights else 16
 
-    out: List[Dict] = []
-    for _, line in lines_map.items():
-        words = line["words"]
-        text = _join_words_with_spacing(words, median_h)
-        if not text:
-            continue
+    result = []
+    for v in lines.values():
+        text = _join_words(v["words"], median_h)
+        if text:
+            result.append({**v, "text": text})
 
-        out.append(
-            {
-                "text": text,
-                "left": int(line["left"]),
-                "top": int(line["top"]),
-                "height": int(line["height"]),
-                "words": words,
-            }
-        )
+    return sorted(result, key=lambda x: (x["top"], x["left"]))
 
-    out.sort(key=lambda x: (x["top"], x["left"]))
-    return out
+# ============================================================
+# DOCX builders
+# ============================================================
 
-
-def _apply_paragraph_style(
-    doc: Document,
-    line: Dict,
-    min_left: int,
-    median_h: float,
-    prev_top: Optional[int],
-    prev_h: Optional[int],
-) -> Tuple[int, int]:
+def _add_paragraph(doc, line, min_left, median_h, prev_top, prev_h):
     text = line["text"]
 
-    indent_px = max(0, int(line["left"]) - min_left)
-    left_indent_in = min(2.0, indent_px / 260.0)  # 260px ~ 1 inch
+    # indent
+    indent_px = max(0, int(line["left"]) - int(min_left))
+    left_indent = min(2.0, indent_px / 260.0)  # 260px ~ 1 inch
 
     h_pt = _px_to_pt(float(line["height"]))
-    is_heading = (line["height"] >= (median_h * 1.35)) and (len(text) <= 80)
+    is_heading = float(line["height"]) >= (median_h * 1.35) and len(text) <= 80
 
-    if _is_numbered_line(text):
-        p = doc.add_paragraph("", style="List Number")
-    elif _is_bulleted_line(text):
-        p = doc.add_paragraph("", style="List Bullet")
-    elif is_heading:
-        p = doc.add_paragraph("", style="Heading 2")
-    else:
-        p = doc.add_paragraph("")
+    # ✅ HECH QANDAY style= YO‘Q (eng stabil)
+    p = doc.add_paragraph("")
 
-    # vertikal gap -> paragraf spacing
+    # vertikal gap -> space_before
     if prev_top is not None and prev_h is not None:
-        gap = int(line["top"]) - (prev_top + prev_h)
+        gap = int(line["top"]) - (int(prev_top) + int(prev_h))
         if gap > median_h * 1.2:
             p.paragraph_format.space_before = Pt(min(18, max(6, _px_to_pt(gap) * 0.6)))
 
-    if left_indent_in > 0:
-        p.paragraph_format.left_indent = Inches(left_indent_in)
+    if left_indent > 0:
+        p.paragraph_format.left_indent = Inches(left_indent)
 
-    run = p.add_run(text)
+    # list belgilarini matnga qo‘shamiz
+    final_text = text
+    if _is_bullet(text):
+        final_text = "• " + text.lstrip("-•*· ").strip()
+
+    run = p.add_run(final_text)
+    _apply_font(run)
 
     if is_heading:
-        run.font.size = Pt(min(26, max(14, h_pt + 2)))
         run.bold = True
+        run.font.size = Pt(min(26, max(14, h_pt + 2)))
     else:
         run.font.size = Pt(min(20, max(10, h_pt)))
 
     return int(line["top"]), int(line["height"])
 
 
-# -----------------------------
-# Public: build DOCX
-# -----------------------------
-def build_docx_bytes_from_image(image_path: Path, lang: str = "eng") -> bytes:
-    """
-    1 ta rasm -> strukturali docx
-    """
-    img_pil = _safe_open_image(image_path)
-    lines = _extract_lines(img_pil, lang=lang)
+
+
+
+def build_docx_bytes_from_image(path: Path, lang: str = "eng") -> bytes:
+    img = _safe_open_image(path)
+    lines = _extract_lines(img, lang)
 
     doc = Document()
     if not lines:
         doc.add_paragraph("")
     else:
         min_left = min(l["left"] for l in lines)
-        heights = sorted([l["height"] for l in lines])
-        median_h = heights[len(heights) // 2] if heights else 16.0
+        median_h = sorted(l["height"] for l in lines)[len(lines)//2]
 
-        prev_top: Optional[int] = None
-        prev_h: Optional[int] = None
-        for line in lines:
-            prev_top, prev_h = _apply_paragraph_style(doc, line, min_left, median_h, prev_top, prev_h)
+        prev_top = prev_h = None
+        for l in lines:
+            prev_top, prev_h = _add_paragraph(doc, l, min_left, median_h, prev_top, prev_h)
 
     buf = BytesIO()
     doc.save(buf)
     return buf.getvalue()
 
 
-def build_docx_bytes_from_images(image_paths: Iterable[Path], lang: str = "eng") -> bytes:
-    """
-    Ko‘p rasm -> bitta docx (orasida page break)
-    """
+def build_docx_bytes_from_images(paths: Iterable[Path], lang: str = "eng") -> bytes:
     doc = Document()
     first = True
 
-    for p in image_paths:
-        img_pil = _safe_open_image(p)
-        lines = _extract_lines(img_pil, lang=lang)
-
+    for p in paths:
         if not first:
             doc.add_page_break()
         first = False
+
+        img = _safe_open_image(p)
+        lines = _extract_lines(img, lang)
 
         if not lines:
             doc.add_paragraph("")
             continue
 
         min_left = min(l["left"] for l in lines)
-        heights = sorted([l["height"] for l in lines])
-        median_h = heights[len(heights) // 2] if heights else 16.0
+        median_h = sorted(l["height"] for l in lines)[len(lines)//2]
 
-        prev_top: Optional[int] = None
-        prev_h: Optional[int] = None
-        for line in lines:
-            prev_top, prev_h = _apply_paragraph_style(doc, line, min_left, median_h, prev_top, prev_h)
+        prev_top = prev_h = None
+        for l in lines:
+            prev_top, prev_h = _add_paragraph(doc, l, min_left, median_h, prev_top, prev_h)
 
     buf = BytesIO()
     doc.save(buf)

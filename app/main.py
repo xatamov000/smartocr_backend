@@ -1,5 +1,7 @@
 import os
 import shutil
+import traceback
+
 from pathlib import Path
 from typing import List, Optional
 
@@ -154,10 +156,12 @@ async def image_to_docx(
         )
 
     except Exception as e:
+        tb = traceback.format_exc()
+        print("\n=== IMAGE->DOCX ERROR ===\n", tb)
         return JSONResponse(
             status_code=500,
             content={"detail": f"IMAGE->DOCX error: {e}"},
-        )
+    )
 
     finally:
         if save_path is not None:
@@ -206,7 +210,7 @@ async def images_to_docx(
         )
 
     except Exception as e:
-        return JSONResponse(
+        raise JSONResponse(
             status_code=500,
             content={"detail": f"IMAGES->DOCX error: {e}"},
         )
