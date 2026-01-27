@@ -1,24 +1,23 @@
 from io import BytesIO
 from docx import Document
 from docx.shared import Pt
-from docx.oxml.ns import qn
 
-FONT_NAME = "Times New Roman"
+# Times New Roman o‘rnini bosuvchi (Linux serverlar uchun)
+FONT_NAME = "Liberation Serif"
 
 
-def _apply_font(run):
+def _apply_font(run, *, size: int | None = None, bold: bool = False, italic: bool = False):
     """
-    🔥 SAFE Cyrillic / Uzbek-Cyrl font apply
+    ✅ SAFE font apply (Render / Docker friendly)
+    - Cyrillic / Uzbek / Russian OK
+    - Bold / Italic OK
+    - No XML hacks
     """
     run.font.name = FONT_NAME
-
-    rPr = run._element.get_or_add_rPr()
-    rFonts = rPr.get_or_add_rFonts()
-
-    rFonts.set(qn("w:ascii"), FONT_NAME)
-    rFonts.set(qn("w:hAnsi"), FONT_NAME)
-    rFonts.set(qn("w:eastAsia"), FONT_NAME)
-    rFonts.set(qn("w:cs"), FONT_NAME)
+    if size is not None:
+        run.font.size = Pt(size)
+    run.bold = bold
+    run.italic = italic
 
 
 def _is_heading(line: str) -> bool:
@@ -47,14 +46,14 @@ def _is_bullet(line: str) -> bool:
 def build_docx_bytes_from_text(text: str) -> bytes:
     """
     Text -> DOCX bytes
-    - 🔥 Cyrillic safe
-    - ❌ No 500 error
+    ✅ No 500 error
+    ✅ Cyrillic safe
+    ✅ Bold / Italic works
     """
     doc = Document()
     text = (text or "").replace("\r\n", "\n").strip("\n")
 
     if not text.strip():
-        doc.add_paragraph("")
         buf = BytesIO()
         doc.save(buf)
         return buf.getvalue()
@@ -80,16 +79,16 @@ def build_docx_bytes_from_text(text: str) -> bytes:
         elif _is_bullet(s):
             p = doc.add_paragraph("", style="List Bullet")
         elif _is_heading(s):
-            p = doc.add_paragraph("", style="Heading 2")
+            p = doc.add_paragraph("")
         else:
             p = doc.add_paragraph("")
 
-        run = p.add_run(s)
-        _apply_font(run)
-
         if _is_heading(s):
-            run.bold = True
-            run.font.size = Pt(14)
+            run = p.add_run(s)
+            _apply_font(run, size=14, bold=True)
+        else:
+            run = p.add_run(s)
+            _apply_font(run, size=12)
 
     buf = BytesIO()
     doc.save(buf)
