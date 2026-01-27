@@ -1,6 +1,6 @@
 fastapi
-uvicorn
-pytesseract
-pillow
-python-docx
+uvicorn[standard]
 python-multipart
+pillow
+pytesseract
+python-docx
