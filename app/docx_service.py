@@ -17,7 +17,7 @@ from docx.oxml.ns import qn
 # GLOBAL DOCX FONT (CYRILLIC SAFE)
 # ============================================================
 
-FONT_NAME = "Roboto"
+FONT_NAME = "Liberation Serif"
 
 # ============================================================
 # Tesseract setup (safe)
