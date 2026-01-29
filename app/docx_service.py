@@ -1,5 +1,5 @@
 """
-🔥 YANGILANGAN DOCX SERVICE - FORMAT SAQLASH BILAN
+🔥 DOCX SERVICE - FORMAT SAQLASH BILAN
 
 Bu service pytesseract'ning image_to_data() funksiyasidan foydalanib:
 1. Har bir so'zning koordinatalari va o'lchamlarini oladi
@@ -10,6 +10,7 @@ Bu service pytesseract'ning image_to_data() funksiyasidan foydalanib:
 from __future__ import annotations
 
 import os
+import shutil
 from io import BytesIO
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
@@ -33,13 +34,35 @@ MIN_FONT_SIZE = 9
 MAX_FONT_SIZE = 28
 
 # ============================================================
-# Tesseract setup
+# Tesseract setup (FIXED)
 # ============================================================
 
-try:
-    from .ocr_service_improved import ensure_tesseract
-except Exception:
-    from ocr_service_improved import ensure_tesseract
+def ensure_tesseract() -> str:
+    """
+    Tesseract'ni topish va sozlash.
+    Render'da bu funksiya kerak emas, lekin compatibility uchun qoldirildi.
+    """
+    current = getattr(pytesseract.pytesseract, "tesseract_cmd", "")
+    if current and Path(current).exists():
+        return current
+
+    found = shutil.which("tesseract")
+    if found:
+        pytesseract.pytesseract.tesseract_cmd = found
+        return found
+
+    # Windows paths
+    candidates = [
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+    ]
+    for c in candidates:
+        if Path(c).exists():
+            pytesseract.pytesseract.tesseract_cmd = c
+            return c
+
+    # Linux/Render - usually in PATH
+    return "tesseract"
 
 
 # ============================================================
@@ -103,7 +126,7 @@ def _safe_open_image(path: Path) -> Image.Image:
 # ============================================================
 
 def _px_to_pt(px: float, dpi: int = 300) -> float:
-    """Pixel dan Point ga o'tkazish (1pt = 1/72 inch)"""
+    """Pixel dan Point ga o'tkazish"""
     inches = px / dpi
     pt = inches * 72
     return max(MIN_FONT_SIZE, min(MAX_FONT_SIZE, pt))
@@ -128,11 +151,9 @@ def _is_heading_text(text: str, height_ratio: float = 1.0) -> bool:
     if not text or len(text) > 100:
         return False
     
-    # Agar juda katta shrift bo'lsa
     if height_ratio >= 1.5:
         return True
     
-    # Agar qisqa va katta harflar ko'p bo'lsa
     if len(text) <= 60:
         upper_count = sum(1 for c in text if c.isupper())
         if upper_count >= max(3, int(len(text) * 0.3)):
@@ -145,11 +166,9 @@ def _is_bullet_or_numbered(text: str) -> Tuple[bool, str]:
     """List item ekanligini aniqlash"""
     text = text.strip()
     
-    # Bullet list
     if text.startswith(("•", "-", "·", "*", "○", "■", "►")):
         return True, "bullet"
     
-    # Numbered list
     if len(text) >= 2 and text[0].isdigit():
         if text[1] in (".", ")", " "):
             return True, "number"
@@ -166,13 +185,15 @@ def _is_bullet_or_numbered(text: str) -> Tuple[bool, str]:
 def _extract_lines_with_format(img: Image.Image, lang: str) -> List[Dict]:
     """
     Pytesseract image_to_data bilan har bir so'z va satrni oladi.
-    Har bir satr uchun: text, left, top, width, height, format
     """
     ensure_tesseract()
     
+    # 🔥 FIX: 'auto' tilini 'eng+rus' ga o'zgartirish
+    if lang == "auto":
+        lang = "eng+rus"
+    
     img = _maybe_autorotate(_preprocess_for_ocr(img))
     
-    # image_to_data - har bir so'z uchun ma'lumot
     data = pytesseract.image_to_data(
         img,
         lang=lang,
@@ -180,8 +201,7 @@ def _extract_lines_with_format(img: Image.Image, lang: str) -> List[Dict]:
         config=_tess_config(),
     )
     
-    # So'zlarni satrlarga birlashtirish
-    lines_dict = {}  # key: (block, par, line)
+    lines_dict = {}
     
     for i, txt in enumerate(data["text"]):
         txt = (txt or "").strip()
@@ -222,14 +242,12 @@ def _extract_lines_with_format(img: Image.Image, lang: str) -> List[Dict]:
         lines_dict[key]["top"] = min(lines_dict[key]["top"], data["top"][i])
         lines_dict[key]["height"] = max(lines_dict[key]["height"], data["height"][i])
     
-    # Satrlarni birlashtirish va tartiblash
     lines = []
     all_heights = []
     
     for key, line_data in lines_dict.items():
         words = sorted(line_data["words"], key=lambda w: w["left"])
         
-        # So'zlarni matunga birlashtirish
         text_parts = []
         prev_right = None
         
@@ -238,7 +256,6 @@ def _extract_lines_with_format(img: Image.Image, lang: str) -> List[Dict]:
             
             if prev_right is not None:
                 gap = left - prev_right
-                # Agar katta bo'shliq bo'lsa, 2 ta space qo'shamiz
                 if gap > line_data["height"] * 1.2:
                     text_parts.append("  ")
                 else:
@@ -259,15 +276,12 @@ def _extract_lines_with_format(img: Image.Image, lang: str) -> List[Dict]:
             })
             all_heights.append(line_data["height"])
     
-    # Median balandlikni hisoblash (normal matn o'lchami uchun)
     median_height = sorted(all_heights)[len(all_heights) // 2] if all_heights else 16
     
-    # Har bir satr uchun metadata qo'shamiz
     for line in lines:
         line["median_height"] = median_height
         line["height_ratio"] = line["height"] / median_height if median_height > 0 else 1.0
     
-    # Top va left bo'yicha tartiblash
     lines.sort(key=lambda x: (x["top"], x["left"]))
     
     return lines
@@ -283,14 +297,7 @@ def _add_formatted_paragraph(
     min_left: int,
     prev_line: Optional[Dict] = None,
 ) -> None:
-    """
-    Formatted paragraph qo'shish:
-    - Indent (left_indent)
-    - Font size (height asosida)
-    - Bold (sarlavhalar uchun)
-    - List style (bullets va numbers)
-    - Vertical spacing
-    """
+    """Formatted paragraph qo'shish"""
     text = line["text"].strip()
     if not text:
         return
@@ -299,20 +306,14 @@ def _add_formatted_paragraph(
     median_h = line["median_height"]
     height_ratio = line["height_ratio"]
     
-    # Indent hisoblash
     indent_px = max(0, line["left"] - min_left)
-    left_indent = min(1.5, indent_px / 200.0)  # 200px ≈ 1 inch
+    left_indent = min(1.5, indent_px / 200.0)
     
-    # Font size hisoblash
     font_size = _px_to_pt(height)
     
-    # Sarlavha ekanligini aniqlash
     is_heading = _is_heading_text(text, height_ratio)
-    
-    # List item ekanligini aniqlash
     is_list, list_type = _is_bullet_or_numbered(text)
     
-    # Paragraph yaratish
     if is_list:
         if list_type == "bullet":
             text = "• " + text.lstrip("•-·*○■► ").strip()
@@ -322,22 +323,18 @@ def _add_formatted_paragraph(
     else:
         p = doc.add_paragraph()
     
-    # Vertical spacing (agar oldingi satrdan uzoq bo'lsa)
     if prev_line is not None:
         gap = line["top"] - (prev_line["top"] + prev_line["height"])
         if gap > median_h * 0.8:
             space_pt = min(12, max(3, gap / 5))
             p.paragraph_format.space_before = Pt(space_pt)
     
-    # Indent
     if left_indent > 0 and not is_list:
         p.paragraph_format.left_indent = Inches(left_indent)
     
-    # Text run
     run = p.add_run(text)
     _apply_font(run)
     
-    # Font size
     if is_heading:
         run.bold = True
         run.font.size = Pt(min(18, max(12, font_size + 2)))
@@ -354,9 +351,7 @@ def build_docx_bytes_from_image(
     lang: str = "eng",
     fast_mode: bool = False,
 ) -> bytes:
-    """
-    Bitta rasmdan formatlangan DOCX yaratish
-    """
+    """Bitta rasmdan formatlangan DOCX yaratish"""
     img = _safe_open_image(path)
     lines = _extract_lines_with_format(img, lang)
     
@@ -368,7 +363,6 @@ def build_docx_bytes_from_image(
         doc.save(buf)
         return buf.getvalue()
     
-    # Min left - indent hisoblash uchun
     min_left = min(l["left"] for l in lines)
     
     prev_line = None
@@ -386,10 +380,7 @@ def build_docx_bytes_from_images(
     lang: str = "eng",
     fast_mode: bool = False,
 ) -> bytes:
-    """
-    Ko'p rasmdan bitta formatlangan DOCX yaratish
-    Har bir rasm - yangi sahifa
-    """
+    """Ko'p rasmdan bitta formatlangan DOCX yaratish"""
     doc = Document()
     first = True
     
@@ -402,7 +393,7 @@ def build_docx_bytes_from_images(
         lines = _extract_lines_with_format(img, lang)
         
         if not lines:
-            doc.add_paragraph(f"(Sahifa {paths.index(path) + 1}: OCR natijasi bo'sh)")
+            doc.add_paragraph(f"(Sahifa: OCR natijasi bo'sh)")
             continue
         
         min_left = min(l["left"] for l in lines)
@@ -418,14 +409,11 @@ def build_docx_bytes_from_images(
 
 
 # ============================================================
-# Text -> DOCX (simple, no formatting detection)
+# Text -> DOCX
 # ============================================================
 
 def build_docx_bytes_from_text(text: str) -> bytes:
-    """
-    Oddiy matndan DOCX yaratish
-    Bu funksiya hozircha oddiy qoladi, lekin keraksa yaxshilanishi mumkin
-    """
+    """Oddiy matndan DOCX yaratish"""
     doc = Document()
     text = (text or "").replace("\r\n", "\n").strip()
     
@@ -451,7 +439,6 @@ def build_docx_bytes_from_text(text: str) -> bytes:
         
         s = line.strip()
         
-        # List yoki sarlavha aniqlash
         is_list, list_type = _is_bullet_or_numbered(s)
         is_heading = _is_heading_text(s)
         
