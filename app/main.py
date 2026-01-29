@@ -9,12 +9,22 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 
-from .ocr_service import run_ocr
-from .docx_service import (
-    build_docx_bytes_from_image,
-    build_docx_bytes_from_images,
-)
-from .docx_text_service import build_docx_bytes_from_text
+# 🔥 YANGILANGAN SERVISLAR - formatlash va tezlik
+try:
+    from .ocr_service_improved import run_ocr
+    from .docx_service_improved import (
+        build_docx_bytes_from_image,
+        build_docx_bytes_from_images,
+        build_docx_bytes_from_text,
+    )
+except ImportError:
+    # Fallback to old services
+    from .ocr_service import run_ocr
+    from .docx_service import (
+        build_docx_bytes_from_image,
+        build_docx_bytes_from_images,
+    )
+    from .docx_text_service import build_docx_bytes_from_text
 
 
 # ============================================================
@@ -54,6 +64,7 @@ async def ocr_endpoint(
     image: UploadFile = File(...),
     lang: str = Form("auto"),
     document_id: Optional[str] = Form(None),
+    fast_mode: bool = Form(False),  # 🔥 YANGI: tezlik rejimi
 ):
     save_path: Path | None = None
     try:
@@ -66,7 +77,7 @@ async def ocr_endpoint(
         text = run_ocr(
             save_path,
             lang=lang,
-            
+            fast_mode=fast_mode,  # 🔥 YANGI
         )
 
         return {
@@ -129,6 +140,7 @@ async def image_to_docx(
     image: UploadFile = File(...),
     lang: str = Form("auto"),
     document_id: Optional[str] = Form(None),
+    fast_mode: bool = Form(False),  # 🔥 YANGI
 ):
     save_path: Path | None = None
     try:
@@ -141,6 +153,7 @@ async def image_to_docx(
         docx_bytes = build_docx_bytes_from_image(
             save_path,
             lang=lang,
+            fast_mode=fast_mode,  # 🔥 YANGI
         )
 
         headers = {
@@ -180,6 +193,7 @@ async def images_to_docx(
     images: List[UploadFile] = File(...),
     lang: str = Form("auto"),
     document_id: Optional[str] = Form(None),
+    fast_mode: bool = Form(False),  # 🔥 YANGI
 ):
     saved: List[Path] = []
     try:
@@ -195,6 +209,7 @@ async def images_to_docx(
         docx_bytes = build_docx_bytes_from_images(
             saved,
             lang=lang,
+            fast_mode=fast_mode,  # 🔥 YANGI
         )
 
         headers = {
