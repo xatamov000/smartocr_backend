@@ -1,0 +1,158 @@
+[
+  {
+    "type": "text",
+    "content": "45.PyTkOBcka.IJHbCkM.PyTkOBCk JI.HepoHHbIe ceTreHeTeckue aropnTMbI  HeyeTke cncreMbI.Hep.c nobck.H.PyHckoro.-M.:Topaya H-TeJeKOM2006.-452c.",
+    "bbox": [
+      37.0,
+      495.0,
+      826.0,
+      569.0
+    ],
+    "confidence": 0.7875629464785258
+  },
+  {
+    "type": "heading",
+    "content": "1-ma'ruza uchun nazorat savollari",
+    "bbox": [
+      283.0,
+      600.0,
+      624.0,
+      622.0
+    ],
+    "confidence": 0.9759429097175598
+  },
+  {
+    "type": "text",
+    "content": "1.TTO fanining maqsadi va vazifasi nimadan iborat?",
+    "bbox": [
+      33.0,
+      651.0,
+      540.0,
+      674.0
+    ],
+    "confidence": 0.9554058313369751
+  },
+  {
+    "type": "text",
+    "content": "qo'yiladi? 3.Timsollarni tanishning asosiy vazifasi nimadan iborat?",
+    "bbox": [
+      68.0,
+      703.0,
+      580.0,
+      754.0
+    ],
+    "confidence": 0.9754492044448853
+  },
+  {
+    "type": "text",
+    "content": "5.Sinf, sinfga xos belgi tushunchalarini izohlang",
+    "bbox": [
+      32.0,
+      783.0,
+      502.0,
+      809.0
+    ],
+    "confidence": 0.9677139520645142
+  },
+  {
+    "type": "text",
+    "content": "tushunchalarini izohlang. oshirilgan? yaratish boyicha qanday ishlar olib borilmoqda?",
+    "bbox": [
+      69.0,
+      915.0,
+      522.0,
+      1046.0
+    ],
+    "confidence": 0.9849522113800049
+  },
+  {
+    "type": "text",
+    "content": "nimadan iborat? kamchiliklarini keltiring?",
+    "bbox": [
+      72.0,
+      1130.0,
+      306.0,
+      1201.0
+    ],
+    "confidence": 0.9744542241096497
+  },
+  {
+    "type": "text",
+    "content": "16.Statistik modellar yutuq va kamchiliklarini keltiring?",
+    "bbox": [
+      34.0,
+      1232.0,
+      561.0,
+      1255.0
+    ],
+    "confidence": 0.984246551990509
+  },
+  {
+    "type": "text",
+    "content": "kamchiliklarini keltiring? tushuntiring? kamchiliklarini keltiring? iborat? kamchiliklarini keltiring?",
+    "bbox": [
+      68.0,
+      1311.0,
+      307.0,
+      1543.0
+    ],
+    "confidence": 0.9939231276512146
+  },
+  {
+    "type": "list",
+    "content": "23. TTTlar qanday masalalarni echishda qollaniladi?",
+    "list_kind": "list_number",
+    "bbox": [
+      33.0,
+      1546.0,
+      531.0,
+      1573.0
+    ],
+    "confidence": 0.9743350744247437
+  },
+  {
+    "type": "heading",
+    "content": "1-ma'ruza uchun testlar",
+    "bbox": [
+      335.0,
+      1600.0,
+      574.0,
+      1622.0
+    ],
+    "confidence": 0.9728261828422546
+  },
+  {
+    "type": "text",
+    "content": "1.<Timsol> sozi ...... sozdan olingan va.. .kabi tushunchalarni bidiradi va va 2.Fan bo'yicha talabalarga bilim,konikma va malakalariga qanday talablar 4.Timsol, timsollar fazosi, xususiyat,xususiyatlar royxati tushunchalarini izohlang 6.TTOni o'qitish masalasining umumiy sxemasi qanday komponentlardan iborat? 7.Tanlanmao'quv tanlanma,nazorat tanlanmaoqitish,o'qituvchili o'qitish, o'qituvchisiz o'qitish,o'z-o'zini (avtomatik) o'qitish tushunchalarini izohlang. 8.Sinflarni hosil qilish,muhim xususiyatlar tizimini aniqlash,HQQ,TTO Timsollarni tanib olishning rivojlanish bosqichlarida qanday ishlar amalga 10.Rossiya va chet elda malumotlarni tahlil va bashorat qilishning dasturiy tizimlarini 11.TTO ning intensional va ekstensional usullarining mohiyati nimadan iborat?",
+    "bbox": [
+      34.0,
+      1652.0,
+      827.0,
+      1676.0
+    ],
+    "confidence": 0.9377991282022916
+  },
+  {
+    "type": "list",
+    "content": "12. Intensional va ekstensional usullarning yutuq va kamchiliklarini keltiring?",
+    "list_kind": "list_number",
+    "bbox": [
+      36.0,
+      1076.0,
+      754.0,
+      1098.0
+    ],
+    "confidence": 0.9771493077278137
+  },
+  {
+    "type": "text",
+    "content": "13.Ajratish usulini qo'llashga asoslangan modellar R-modellar)ning mohiyati 14.Ajratish usulini qo'llashga asoslangan modellar R-modellar)ning yutuq va 15.Statistik modellar qanday matematik apparatlarni qo'llashga asoslangan? 17.Potensiallar omiliga asoslangan modellar (II-modellar) nimaga asoslangan? 18.Potensiallar omiliga asoslanganmodellarIl-modellar)ningyutuq 19.Matematik mantiq apparati asosida quril gan modellar (L-modellar)ning mohiyatini 20.Matematik mantiq apparati asosida qurilgan modellar L-modellar)ning yutuq va 21.Baholarni hisoblashga asoslangan modellar (G-modellar)ning mohiyati nimadan 22.Baholarni hisoblashga asoslangan modellar G-modellar)ning yutuq",
+    "bbox": [
+      37.0,
+      1102.0,
+      826.0,
+      1521.0
+    ],
+    "confidence": 0.9646448029412164
+  }
+]
