@@ -1,28 +1,35 @@
 # app/main.py
 """
 SmartOCR Backend v4 - PaddleOCR Direct Pipeline
-No PPStructureV3. Fast. Clean.
+
+Changes vs previous:
+- FastAPI lifespan startup: preload PaddleOCR engines (en + cyrillic)
+  so the first OCR request isn't 30–60s slow.
 """
 
-import os
+import asyncio
+import logging
 import shutil
 import traceback
-import logging
-import asyncio
-import uvicorn
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List
-from concurrent.futures import ThreadPoolExecutor
-import uuid
 
+import uvicorn
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, JSONResponse
+from fastapi.responses import JSONResponse, Response
 
-from .pdf_compress_service import compress_pdf, CompressionLevel
+from .pdf_compress_service import compress_pdf
 from .universal_merge_service import detect_and_merge
 from .services.ocr_pipeline import process_document
-from .export.word_export import build_docx_from_blocks, build_docx_from_text, build_multi_page_docx
+from .export.word_export import (
+    build_docx_from_blocks,
+    build_docx_from_text,
+    build_multi_page_docx,
+)
 
 try:
     from .docx_text_service import build_docx_bytes_from_text
@@ -38,7 +45,32 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ocr")
 
-app = FastAPI(title="SmartOCR Backend", version="4.0.0")
+
+# ─────────────────────────────────────────────
+# Startup: preload OCR engines
+# ─────────────────────────────────────────────
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Preload PaddleOCR models at process start to eliminate first-request cold start."""
+    try:
+        from .services.ocr_engine import _get_paddle, is_paddle_available
+
+        if is_paddle_available():
+            logger.info("Preloading PaddleOCR engines (en, cyrillic)...")
+            _get_paddle("en")
+            _get_paddle("cyrillic")
+            logger.info("PaddleOCR engines ready")
+        else:
+            logger.warning("PaddleOCR not available; will use Tesseract fallback")
+    except Exception as e:
+        logger.error(f"Engine preload failed: {e}")
+    yield
+    # Teardown: ThreadPoolExecutor cleans itself up
+
+
+app = FastAPI(title="SmartOCR Backend", version="4.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -72,7 +104,7 @@ async def health():
 
     return {
         "status": "ok",
-        "version": "4.0.0",
+        "version": "4.1.0",
         "ocr_engine": "paddleocr" if is_paddle_available() else "tesseract",
     }
 
@@ -109,7 +141,10 @@ async def ocr_endpoint(image: UploadFile = File(...), lang: str = Form("auto")):
             }
         )
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e), "detail": traceback.format_exc()})
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "detail": traceback.format_exc()},
+        )
     finally:
         if tmp and tmp.exists():
             tmp.unlink()
@@ -136,7 +171,10 @@ async def ocr_docx(image: UploadFile = File(...), lang: str = Form("auto")):
             },
         )
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e), "detail": traceback.format_exc()})
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "detail": traceback.format_exc()},
+        )
     finally:
         if tmp and tmp.exists():
             tmp.unlink()
@@ -161,7 +199,10 @@ async def ocr_docx_multi(images: List[UploadFile] = File(...), lang: str = Form(
             headers={"Content-Disposition": 'attachment; filename="merged_ocr.docx"'},
         )
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e), "detail": traceback.format_exc()})
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "detail": traceback.format_exc()},
+        )
     finally:
         for p in saved:
             p.unlink(missing_ok=True)
@@ -180,7 +221,11 @@ async def images_to_docx(images: List[UploadFile] = File(...), lang: str = Form(
 @app.post("/text-to-docx")
 async def text_to_docx(text: str = Form(...)):
     try:
-        docx = build_docx_bytes_from_text(text) if build_docx_bytes_from_text else build_docx_from_text(text)
+        docx = (
+            build_docx_bytes_from_text(text)
+            if build_docx_bytes_from_text
+            else build_docx_from_text(text)
+        )
         return Response(
             content=docx,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -221,7 +266,9 @@ async def compress_pdf_ep(file: UploadFile = File(...), level: str = Form(...)):
 @app.post("/merge")
 async def merge_ep(files: List[UploadFile] = File(...)):
     if len(files) < 2:
-        return JSONResponse(status_code=400, content={"error": "At least 2 files required"})
+        return JSONResponse(
+            status_code=400, content={"error": "At least 2 files required"}
+        )
     tmps = []
     tmp_out = None
     try:
@@ -236,7 +283,11 @@ async def merge_ep(files: List[UploadFile] = File(...)):
         tmp_out = final if final.exists() else Path(str(out))
         with open(tmp_out, "rb") as f:
             data = f.read()
-        mt = "application/pdf" if ft == "pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        mt = (
+            "application/pdf"
+            if ft == "pdf"
+            else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
         return Response(
             content=data,
             media_type=mt,
